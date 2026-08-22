@@ -4,7 +4,7 @@ import os
 import threading
 
 from ..agent_indexer import AgentIndexWorker
-from ..db import get_index_worker_enabled
+from ..db import connect, get_index_worker_enabled
 from .controllers import (
     AgentController,
     GradingController,
@@ -189,7 +189,8 @@ class LoggingHTTPServer(ThreadingHTTPServer):
 
 
 def index_worker_default_enabled(db_path):
-    saved_setting = get_index_worker_enabled(db_path)
+    with connect(db_path) as conn:
+        saved_setting = get_index_worker_enabled(conn)
     if saved_setting is not None:
         return saved_setting
     disabled = os.environ.get("GONGKAO_DISABLE_INDEX", "").strip().lower() in {"1", "true", "yes", "on"}
