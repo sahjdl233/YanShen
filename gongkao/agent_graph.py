@@ -127,6 +127,67 @@ def _record_step(db_path, run_id, step_type, tool_name, input_data, output_data)
                 pass
 
 
+def _repair_agent_json(candidate):
+    """Repair common LLM JSON issues in agent responses."""
+    fixed = candidate.strip()
+    fixed = re.sub(r",\s*([}\]])", r"\1", fixed)
+    try:
+        return json.loads(fixed)
+    except json.JSONDecodeError:
+        pass
+    # Python booleans/null
+    fixed = re.sub(r"\bTrue\b", "true", fixed)
+    fixed = re.sub(r"\bFalse\b", "false", fixed)
+    fixed = re.sub(r"\bNone\b", "null", fixed)
+    try:
+        return json.loads(fixed)
+    except json.JSONDecodeError:
+        pass
+    # Unescaped inner quotes: a quote is closing only if next non-ws char is , } ] : or end
+    result = []
+    in_string = False
+    i = 0
+    n = len(fixed)
+    while i < n:
+        ch = fixed[i]
+        if in_string and ch == "\\" and i + 1 < n:
+            result.append(ch)
+            result.append(fixed[i + 1])
+            i += 2
+            continue
+        if ch == '"':
+            if not in_string:
+                in_string = True
+                result.append(ch)
+                i += 1
+                continue
+            j = i + 1
+            while j < n and fixed[j] in " \t\r\n":
+                j += 1
+            if j >= n or fixed[j] in ",}]:": 
+                in_string = False
+                result.append(ch)
+            else:
+                result.append("\\\"")
+            i += 1
+            continue
+        result.append(ch)
+        i += 1
+    fixed = "".join(result)
+    try:
+        return json.loads(fixed)
+    except json.JSONDecodeError:
+        pass
+    opens_curly = fixed.count("{") - fixed.count("}")
+    opens_square = fixed.count("[") - fixed.count("]")
+    if opens_curly > 0 or opens_square > 0:
+        fixed += "]" * max(0, opens_square) + "}" * max(0, opens_curly)
+    try:
+        return json.loads(fixed)
+    except json.JSONDecodeError:
+        return {}
+
+
 def _json_object(text):
     text = text or ""
     match = re.search(r"\{.*\}", text, flags=re.S)
@@ -135,7 +196,7 @@ def _json_object(text):
     try:
         parsed = json.loads(match.group(0))
     except json.JSONDecodeError:
-        return {}
+        parsed = _repair_agent_json(match.group(0))
     return parsed if isinstance(parsed, dict) else {}
 
 
@@ -146,7 +207,9 @@ def _structured_output(text):
         try:
             parsed = json.loads(raw_json.strip())
         except json.JSONDecodeError:
-            continue
+            parsed = _repair_agent_json(raw_json.strip())
+            if not isinstance(parsed, dict):
+                continue
         if isinstance(parsed, dict):
             return parsed
     parsed = _json_object(text)
