@@ -6,6 +6,107 @@
 
 题目、材料和参考答案仅供个人学习使用，GitHub 仓库建议保持 **Private**。
 
+## 0. 1H1G VPS：推荐不用 Docker
+
+1H1G 可以用轻量裸进程方式部署。不要安装 `requirements.txt`，改用 `requirements-server.txt`；它保留批改页面、题库、导入导出和本地检索必需依赖，省去 AI 教练/嵌入模型相关重包。
+
+先确认系统有 Python 3.12。Ubuntu 24.04 可直接安装：
+
+```bash
+sudo apt update
+sudo apt install -y python3.12 python3.12-venv python3.12-dev git curl sqlite3
+```
+
+1G 内存建议先加 1G swap，降低首次索引或 pip 安装时被 OOM Kill 的概率：
+
+```bash
+sudo fallocate -l 1G /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+```
+
+创建运行用户和目录：
+
+```bash
+sudo adduser --system --group --home /home/yanshen yanshen
+sudo mkdir -p /opt/yanshen /var/lib/yanshen
+sudo chown yanshen:yanshen /opt/yanshen /var/lib/yanshen
+```
+
+上传代码到 GitHub 后，在 VPS 拉取并安装：
+
+```bash
+sudo -u yanshen git clone git@github.com:<你的用户名>/<你的仓库名>.git /opt/yanshen
+cd /opt/yanshen
+sudo -u yanshen python3.12 -m venv .venv
+sudo -u yanshen .venv/bin/pip install --upgrade pip
+sudo -u yanshen .venv/bin/pip install -r requirements-server.txt
+```
+
+安装 systemd 服务：
+
+```bash
+sudo cp deploy/yanshen.service /etc/systemd/system/yanshen.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now yanshen
+systemctl status yanshen --no-pager
+curl -fsS http://127.0.0.1:8000/health
+```
+
+从本机访问：
+
+```powershell
+ssh -N -L 8000:127.0.0.1:8000 <vps用户>@<VPS公网IP>
+```
+
+然后打开 `http://127.0.0.1:8000`。
+
+低内存调优已写入服务文件：后台索引每次只处理 2 条，空闲间隔 10 秒。如果仍然内存吃紧，且只需要“基础批改”或 Codex 手动模式，可以关闭后台索引：
+
+```bash
+sudo systemctl edit yanshen
+```
+
+写入并保存：
+
+```ini
+[Service]
+Environment=GONGKAO_DISABLE_INDEX=1
+```
+
+再执行：
+
+```bash
+sudo systemctl restart yanshen
+```
+
+注意：关闭索引后，增强版智能批改的本地证据检索可能不可用；基础 API 批改仍可用。
+
+查看日志：
+
+```bash
+journalctl -u yanshen -f
+```
+
+更新代码：
+
+```bash
+cd /opt/yanshen
+sudo -u yanshen git pull
+sudo -u yanshen .venv/bin/pip install -r requirements-server.txt
+sudo systemctl restart yanshen
+```
+
+备份：
+
+```bash
+sudo cp /var/lib/yanshen/gongkao.sqlite3 /backup/gongkao.sqlite3
+```
+
+更稳妥的在线备份方式是先停止服务几秒，复制数据库和相邻的 `-wal`/`-shm` 文件后再启动。
+
 ## 1. 上传到 GitHub
 
 在本机执行：

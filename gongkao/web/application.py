@@ -163,8 +163,19 @@ def create_server(host="127.0.0.1", port=5000, db_path=None):
     prepare_user_database(resolved_db_path, seed_db_path())
     server = LoggingHTTPServer((host, port), Handler)
     server.app_context = ApplicationContext.create(resolved_db_path, ROOT)
-    if db_path is None:
-        server.index_worker = AgentIndexWorker(resolved_db_path)
+    if db_path is None and os.environ.get("GONGKAO_DISABLE_INDEX", "").strip().lower() not in {"1", "true", "yes", "on"}:
+        try:
+            batch_size = int(os.environ.get("GONGKAO_INDEX_BATCH_SIZE", "4"))
+            idle_seconds = float(os.environ.get("GONGKAO_INDEX_IDLE_SECONDS", "5"))
+            batch_pause_seconds = float(os.environ.get("GONGKAO_INDEX_BATCH_PAUSE", "0.5"))
+        except ValueError as exc:
+            raise ValueError("索引相关环境变量必须是数字。") from exc
+        server.index_worker = AgentIndexWorker(
+            resolved_db_path,
+            batch_size=max(1, batch_size),
+            idle_seconds=max(0.1, idle_seconds),
+            batch_pause_seconds=max(0.05, batch_pause_seconds),
+        )
         server.index_worker.start()
     return server
 

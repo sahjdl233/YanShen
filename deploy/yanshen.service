@@ -1,0 +1,29 @@
+[Unit]
+Description=YanShen local study app
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=yanshen
+Group=yanshen
+WorkingDirectory=/opt/yanshen
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONUNBUFFERED=1
+Environment=GONGKAO_DATA_DIR=/var/lib/yanshen
+Environment=GONGKAO_HOST=127.0.0.1
+Environment=GONGKAO_PORT=8000
+Environment=GONGKAO_INDEX_BATCH_SIZE=2
+Environment=GONGKAO_INDEX_IDLE_SECONDS=10
+Environment=GONGKAO_INDEX_BATCH_PAUSE=1
+ExecStart=/opt/yanshen/.venv/bin/python app.py
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/yanshen
+
+[Install]
+WantedBy=multi-user.target
