@@ -250,6 +250,53 @@ def build_rubric_prompt(question, materials, references, consensus):
 """
 
 
+def _repair_json(candidate):
+    """Attempt common LLM JSON fixes: trailing commas, unescaped control chars, missing closers."""
+    fixed = candidate.strip()
+    # Remove trailing commas before } or ]
+    fixed = re.sub(r",\s*([}\]])", r"\1", fixed)
+    # Escape raw newlines/tabs that appear inside string values
+    # This is tricky: we only want to escape them when they're between quotes.
+    # A simple heuristic: replace bare \n with \\n only if not already escaped.
+    lines = fixed.split("\n")
+    rebuilt = []
+    for line in lines:
+        # Skip lines that are structural (start/end braces, etc.)
+        stripped = line.lstrip()
+        if stripped.startswith(('"', "{", "}", "[", "]", "//")) or not stripped:
+            rebuilt.append(line)
+        elif '"' in line:
+            # Likely a value line; escape internal newlines won't apply per-line,
+            # but tabs can be an issue.
+            rebuilt.append(line.replace("\t", "\\t"))
+        else:
+            rebuilt.append(line)
+    fixed = "\n".join(rebuilt)
+
+    for attempt in [fixed]:
+        try:
+            return json.loads(attempt)
+        except json.JSONDecodeError:
+            pass
+
+    # Try balancing brackets: count unmatched { } [ ]
+    opens_curly = fixed.count("{") - fixed.count("}")
+    opens_square = fixed.count("[") - fixed.count("]")
+    if opens_curly > 0 or opens_square > 0:
+        fixed = fixed + ("]" * max(0, opens_square)) + ("}" * max(0, opens_curly))
+        try:
+            return json.loads(fixed)
+        except json.JSONDecodeError:
+            pass
+
+    # Last resort: strip trailing commas again after bracket fix
+    fixed = re.sub(r",\s*([}\]])", r"\1", fixed)
+    try:
+        return json.loads(fixed)
+    except json.JSONDecodeError:
+        raise
+
+
 def extract_tagged_json(text, tag):
     match = re.search(rf"<{re.escape(tag)}>\s*(.*?)\s*</{re.escape(tag)}>", str(text or ""), flags=re.I | re.S)
     candidate = match.group(1) if match else str(text or "").strip()
@@ -260,8 +307,12 @@ def extract_tagged_json(text, tag):
     except json.JSONDecodeError:
         start, end = candidate.find("{"), candidate.rfind("}")
         if start >= 0 and end > start:
-            return json.loads(candidate[start : end + 1])
-        raise
+            inner = candidate[start : end + 1]
+            try:
+                return json.loads(inner)
+            except json.JSONDecodeError:
+                return _repair_json(inner)
+        return _repair_json(candidate)
 
 
 def normalize_essay_coverage_roles(rubric):
