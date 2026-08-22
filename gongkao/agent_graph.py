@@ -67,12 +67,36 @@ def _subject_type(task_type):
 def _load_langgraph():
     try:
         from langchain_openai import ChatOpenAI
+        from langchain_openai.chat_models.base import BaseChatOpenAI
         from langgraph.graph import END, START, StateGraph
+        _patch_str_response_compat(BaseChatOpenAI)
     except ImportError as exc:
         raise AgentDependencyError(
             f"未安装 LangGraph/LangChain 依赖 ({exc})。请确认环境或重新安装依赖。"
         ) from exc
     return ChatOpenAI, StateGraph, START, END
+
+
+_str_response_patched = False
+
+
+def _patch_str_response_compat(base_class):
+    """Some OpenAI-compatible proxies return raw strings instead of parsed objects."""
+    global _str_response_patched
+    if _str_response_patched:
+        return
+    _str_response_patched = True
+    _original = base_class._create_chat_result
+
+    def _safe_create(self, response, generation_info=None):
+        if isinstance(response, str):
+            try:
+                response = json.loads(response)
+            except (json.JSONDecodeError, TypeError):
+                pass
+        return _original(self, response, generation_info)
+
+    base_class._create_chat_result = _safe_create
 
 
 def _load_sqlite_checkpointer(db_path, stack):
