@@ -1,6 +1,7 @@
 """Settings, import, export, and local-record management controllers."""
 
 from ...ai import AiConfigError, AiRequestError, chat_completion, fetch_available_models
+from ..db import get_index_worker_enabled, set_index_worker_enabled
 from ..runtime import (
     back_link,
     parse_multipart_form,
@@ -26,7 +27,11 @@ from ..runtime import (
 
 class SettingsController:
     def _agent_index_status(self):
+        server = getattr(self, "server", None)
+        worker = getattr(server, "index_worker", None)
+        thread = getattr(worker, "_thread", None)
         with connect(self.db_path) as conn:
+            saved_enabled = get_index_worker_enabled(conn)
             state = conn.execute(
                 "SELECT * FROM agent_context_worker_state WHERE id = 1"
             ).fetchone()
@@ -87,7 +92,12 @@ class SettingsController:
             }
             for row in failed_rows
         ]
+        env_disabled = os.environ.get("GONGKAO_DISABLE_INDEX", "").strip().lower() in {"1", "true", "yes", "on"}
         return {
+            "enabled": saved_enabled if saved_enabled is not None else not env_disabled,
+            "configured": saved_enabled is not None,
+            "runtime_active": bool(thread and thread.is_alive()),
+            "env_disabled": env_disabled,
             "status": raw_status,
             "status_label": labels.get(raw_status, "后台整理中"),
             "current_type": type_labels.get((state["current_type"] if state else "") or "", "索引任务"),
@@ -104,6 +114,27 @@ class SettingsController:
 
     def handle_settings_index_status(self):
         self.send_json(self._agent_index_status())
+
+    def handle_settings_index_toggle(self):
+        length = int(self.headers.get("Content-Length", "0"))
+        data = self.rfile.read(length).decode("utf-8")
+        form = parse_qs(data)
+        raw_enabled = form.get("enabled", [""])[0].strip().lower()
+        if raw_enabled not in {"0", "1"}:
+            self.send_json({"ok": False, "error": "索引开关参数无效。"}, 400)
+            return
+        enabled = raw_enabled == "1"
+        try:
+            with connect(self.db_path) as conn:
+                set_index_worker_enabled(conn, enabled)
+            server = getattr(self, "server", None)
+            if server is None:
+                raise RuntimeError("服务器索引控制器不可用。")
+            server.configure_index_worker(enabled)
+        except Exception as exc:
+            self.send_json({"ok": False, "error": str(exc)}, 500)
+            return
+        self.send_json({"ok": True, **self._agent_index_status()})
 
     def page_import(self, flashes=None):
         with connect(self.db_path) as conn:
@@ -177,6 +208,9 @@ class SettingsController:
         with connect(self.db_path) as conn:
             settings = conn.execute("SELECT * FROM ai_settings WHERE id = 1").fetchone()
             agent_settings = conn.execute("SELECT * FROM agent_ai_settings WHERE id = 1").fetchone()
+            index_saved_enabled = get_index_worker_enabled(conn)
+        env_index_disabled = os.environ.get("GONGKAO_DISABLE_INDEX", "").strip().lower() in {"1", "true", "yes", "on"}
+        index_enabled = index_saved_enabled if index_saved_enabled is not None else not env_index_disabled
         mode_codex = " checked" if settings["mode"] == "codex" else ""
         mode_api = " checked" if settings["mode"] == "api" else ""
         grading_enhanced = " checked" if settings["grading_mode"] == "enhanced" else ""
@@ -256,6 +290,11 @@ class SettingsController:
           <section class="settings-panel settings-data-panel">
             <div class="settings-section-heading"><span>02</span><div><h2>数据管理</h2><p>题库维护、个人记录备份与本地数据清理。</p></div></div>
             <div class="settings-data-grid">
+              <form class="settings-block settings-block-inline" method="post" action="/settings/index-toggle" data-index-toggle-form>
+                <div><h3>后台索引</h3><p class="muted">关闭可降低 CPU 和内存占用；开启后智能批改证据检索更完整。</p></div>
+                <label class="check-line"><input type="checkbox" data-index-toggle value="1"{"" if not index_enabled else " checked"}> 开启后台索引</label>
+                <div class="connection-actions"><span class="connection-status muted" data-index-status aria-live="polite">正在获取状态…</span><button class="button ghost small" type="submit">应用当前状态</button></div>
+              </form>
               <div class="settings-block settings-block-inline">
                 <div><h3>资料维护</h3><p class="muted">导入新的题目与参考答案。</p></div>
                 <a class="button primary" href="/import">导入题目/答案</a>

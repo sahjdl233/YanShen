@@ -95,6 +95,7 @@ POST_ROUTE_GROUPS = {
         Route("handle_import", exact="/import"),
         Route("handle_text_annotations", exact="/annotations"),
         Route("handle_settings_import", exact="/settings/import"),
+        Route("handle_settings_index_toggle", exact="/settings/index-toggle"),
         Route("handle_settings_local_records_clear", exact="/settings/local-records/clear"),
         Route("handle_settings_local_records_open", exact="/settings/local-records/open"),
         Route("handle_settings_ai_test", exact="/settings/ai/test"),

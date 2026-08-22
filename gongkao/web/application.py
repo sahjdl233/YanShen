@@ -1,8 +1,10 @@
 """Compose the built-in HTTP server from grouped page controllers."""
 
 import os
+import threading
 
 from ..agent_indexer import AgentIndexWorker
+from ..db import get_index_worker_enabled
 from .controllers import (
     AgentController,
     GradingController,
@@ -146,6 +148,7 @@ class Handler(
 
 class LoggingHTTPServer(ThreadingHTTPServer):
     index_worker = None
+    _index_worker_lock = threading.Lock()
 
     def handle_error(self, request, client_address):
         logging.exception("Request failed for %s", client_address)
@@ -157,26 +160,51 @@ class LoggingHTTPServer(ThreadingHTTPServer):
             worker.stop()
         super().server_close()
 
+    def configure_index_worker(self, enabled):
+        with self._index_worker_lock:
+            worker = self.index_worker
+            if not enabled:
+                self.index_worker = None
+                if worker is not None:
+                    worker.stop()
+                return
+            if worker is not None and worker._thread and worker._thread.is_alive():
+                return
+            if worker is not None:
+                worker.stop()
+            try:
+                batch_size = int(os.environ.get("GONGKAO_INDEX_BATCH_SIZE", "4"))
+                idle_seconds = float(os.environ.get("GONGKAO_INDEX_IDLE_SECONDS", "5"))
+                batch_pause_seconds = float(os.environ.get("GONGKAO_INDEX_BATCH_PAUSE", "0.5"))
+            except ValueError as exc:
+                raise ValueError("索引相关环境变量必须是数字。") from exc
+            worker = AgentIndexWorker(
+                self.db_path,
+                batch_size=max(1, batch_size),
+                idle_seconds=max(0.1, idle_seconds),
+                batch_pause_seconds=max(0.05, batch_pause_seconds),
+            )
+            self.index_worker = worker
+            worker.start()
+
+
+def index_worker_default_enabled(db_path):
+    saved_setting = get_index_worker_enabled(db_path)
+    if saved_setting is not None:
+        return saved_setting
+    disabled = os.environ.get("GONGKAO_DISABLE_INDEX", "").strip().lower() in {"1", "true", "yes", "on"}
+    return not disabled
+
 
 def create_server(host="127.0.0.1", port=5000, db_path=None):
     resolved_db_path = Path(db_path) if db_path else user_db_path()
     prepare_user_database(resolved_db_path, seed_db_path())
     server = LoggingHTTPServer((host, port), Handler)
     server.app_context = ApplicationContext.create(resolved_db_path, ROOT)
-    if db_path is None and os.environ.get("GONGKAO_DISABLE_INDEX", "").strip().lower() not in {"1", "true", "yes", "on"}:
-        try:
-            batch_size = int(os.environ.get("GONGKAO_INDEX_BATCH_SIZE", "4"))
-            idle_seconds = float(os.environ.get("GONGKAO_INDEX_IDLE_SECONDS", "5"))
-            batch_pause_seconds = float(os.environ.get("GONGKAO_INDEX_BATCH_PAUSE", "0.5"))
-        except ValueError as exc:
-            raise ValueError("索引相关环境变量必须是数字。") from exc
-        server.index_worker = AgentIndexWorker(
-            resolved_db_path,
-            batch_size=max(1, batch_size),
-            idle_seconds=max(0.1, idle_seconds),
-            batch_pause_seconds=max(0.05, batch_pause_seconds),
-        )
-        server.index_worker.start()
+    server.db_path = resolved_db_path
+    server.configure_index_worker(
+        db_path is None and index_worker_default_enabled(resolved_db_path)
+    )
     return server
 
 

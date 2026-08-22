@@ -24,6 +24,7 @@ import {
   initializeFilters,
   initializeGlobalForms,
   initializeSettingsConnections,
+  initializeSettingsIndex,
   initializeShellControls,
   initializeTabsAndPagination,
 } from "./js/shell.js";
@@ -62,6 +63,7 @@ export function mountPage() {
   initializeAgent(signal, navigatePartial);
   initializeShellControls(signal);
   initializeSettingsConnections(signal);
+  initializeSettingsIndex(signal);
   initializePractice(signal);
   initializeAnnotations(signal);
   initializeFilters(signal, navigatePartial);

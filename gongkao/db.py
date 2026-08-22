@@ -1139,6 +1139,25 @@ def seed_ai_settings(conn):
     )
 
 
+def get_index_worker_enabled(conn):
+    row = conn.execute(
+        "SELECT value FROM release_metadata WHERE key = 'index_worker_enabled'"
+    ).fetchone()
+    if row is None:
+        return None
+    return str(row["value"]).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def set_index_worker_enabled(conn, enabled):
+    conn.execute(
+        """
+        INSERT INTO release_metadata (key, value) VALUES ('index_worker_enabled', ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+        """,
+        ("1" if enabled else "0",),
+    )
+
+
 def seed_agent_ai_settings(conn):
     conn.execute(
         """

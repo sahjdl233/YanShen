@@ -262,6 +262,74 @@ export function initializeSettingsConnections(signal) {
     }, { signal });
   }
 }
+function indexStatusText(result) {
+  if (!result?.ok && result?.error) return result.error;
+  const desired = result.enabled ? "已开启" : "已关闭";
+  const runtime = result.runtime_active ? "后台线程运行中" : "后台线程未运行";
+  const pending = Number(result.pending_count || 0);
+  const failed = Number(result.failed_count || 0);
+  let detail = pending ? `待处理 ${pending} 条` : "队列为空";
+  if (failed) detail += ` · 失败 ${failed} 条`;
+  return `${desired} · ${runtime} · ${detail}`;
+}
+
+async function requestIndexToggle(form, checkbox, status) {
+  if (form.dataset.indexBusy === "1") return;
+  form.dataset.indexBusy = "1";
+  checkbox.disabled = true;
+  status.classList.remove("is-error");
+  status.textContent = "正在更新索引设置…";
+  try {
+    const body = new URLSearchParams({ enabled: checkbox.checked ? "1" : "0" });
+    const response = await fetch("/settings/index-toggle", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+      body,
+    });
+    const result = await response.json();
+    if (!response.ok || !result.ok) throw new Error(result.error || `请求失败（HTTP ${response.status}）`);
+    status.textContent = indexStatusText(result);
+  } catch (error) {
+    status.classList.add("is-error");
+    status.textContent = error.message;
+    await refreshIndexStatus(status, checkbox);
+  } finally {
+    form.dataset.indexBusy = "0";
+    checkbox.disabled = false;
+  }
+}
+
+async function refreshIndexStatus(status, checkbox) {
+  try {
+    const response = await fetch("/settings/index-status");
+    const result = await response.json();
+    if (checkbox && typeof result.enabled === "boolean") checkbox.checked = result.enabled;
+    status.textContent = indexStatusText(result);
+  } catch (error) {
+    throw error;
+  }
+}
+
+export function initializeSettingsIndex(signal) {
+  document.querySelectorAll("[data-index-toggle-form]").forEach((form) => {
+    const checkbox = form.querySelector("[data-index-toggle]");
+    const status = form.querySelector("[data-index-status]");
+    if (!checkbox || !status || form.dataset.indexBound === "1") return;
+    form.dataset.indexBound = "1";
+    const initialText = status.textContent;
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      requestIndexToggle(form, checkbox, status);
+    }, { signal });
+    checkbox.addEventListener("change", () => {
+      requestIndexToggle(form, checkbox, status);
+    }, { signal });
+    refreshIndexStatus(status, checkbox).catch(() => {
+      status.textContent = initialText;
+    });
+  });
+}
+
 export function initializeFilters(_signal, navigatePartial) {
   document.querySelectorAll("form.auto-filter").forEach((form) => {
     form.querySelector("[data-filter-reset]")?.addEventListener("click", () => {
