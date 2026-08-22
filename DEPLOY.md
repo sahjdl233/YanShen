@@ -10,11 +10,12 @@
 
 1H1G 可以用轻量裸进程方式部署。不要安装 `requirements.txt`，改用 `requirements-server.txt`；它保留批改页面、题库、导入导出和本地检索必需依赖，省去 AI 教练/嵌入模型相关重包。
 
-先确认系统有 Python 3.12。Ubuntu 24.04 可直接安装：
+应用已兼容 Python 3.13（不再使用被移除的 `cgi` 模块）。确认系统 Python 是 3.11 或更新版本；Debian 13 / Ubuntu 24.04 可直接用系统 Python：
 
 ```bash
+python3 --version
 sudo apt update
-sudo apt install -y python3.12 python3.12-venv python3.12-dev git curl sqlite3
+sudo apt install -y python3 python3-venv git curl sqlite3
 ```
 
 1G 内存建议先加 1G swap，降低首次索引或 pip 安装时被 OOM Kill 的概率：
@@ -40,7 +41,7 @@ sudo chown yanshen:yanshen /opt/yanshen /var/lib/yanshen
 ```bash
 sudo -u yanshen git clone git@github.com:<你的用户名>/<你的仓库名>.git /opt/yanshen
 cd /opt/yanshen
-sudo -u yanshen python3.12 -m venv .venv
+sudo -u yanshen python3 -m venv .venv
 sudo -u yanshen .venv/bin/pip install --upgrade pip
 sudo -u yanshen .venv/bin/pip install -r requirements-server.txt
 ```

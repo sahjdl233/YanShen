@@ -1,6 +1,5 @@
 """Shared rendering helpers used by the web controllers."""
 
-import cgi
 import html
 import json
 import logging
@@ -78,6 +77,7 @@ from ..services.personal_records import (
 from ..statistics import build_module_score_statistics, build_training_statistics, parse_report_score
 from ..timeutils import BEIJING_TIMEZONE, format_beijing_time
 from .context import ApplicationContext
+from .forms import MultipartForm, UploadedFile, parse_multipart_form
 from .routing import dispatch_get, dispatch_post
 from .templating import render_layout
 

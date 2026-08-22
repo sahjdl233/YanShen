@@ -3,7 +3,7 @@
 from ...ai import AiConfigError, AiRequestError, chat_completion, fetch_available_models
 from ..runtime import (
     back_link,
-    cgi,
+    parse_multipart_form,
     connect,
     create_import_record,
     esc,
@@ -140,11 +140,7 @@ class SettingsController:
         self.send_html(layout("导入 - 研申", body, "import", flashes))
 
     def handle_import(self):
-        form = cgi.FieldStorage(
-            fp=self.rfile,
-            headers=self.headers,
-            environ={"REQUEST_METHOD": "POST", "CONTENT_TYPE": self.headers.get("Content-Type", "")},
-        )
+        form = parse_multipart_form(self.rfile, self.headers)
         question_file = (
             form["question_file"]
             if "question_file" in form and getattr(form["question_file"], "filename", "")
@@ -525,11 +521,7 @@ class SettingsController:
         self.send_text(content, "gongkao-personal-backup.json", "application/json; charset=utf-8")
 
     def handle_settings_import(self):
-        form = cgi.FieldStorage(
-            fp=self.rfile,
-            headers=self.headers,
-            environ={"REQUEST_METHOD": "POST", "CONTENT_TYPE": self.headers.get("Content-Type", "")},
-        )
+        form = parse_multipart_form(self.rfile, self.headers)
         backup = form["backup_file"] if "backup_file" in form and getattr(form["backup_file"], "filename", "") else None
         if backup is None:
             self.page_settings([("error", "请选择要导入的备份 JSON 文件。")])
