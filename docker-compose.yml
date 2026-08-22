@@ -1,0 +1,19 @@
+services:
+  yanshen:
+    build: .
+    image: yanshen:local
+    container_name: yanshen
+    restart: unless-stopped
+    ports:
+      # Keep the service reachable only on the VPS loopback by default.
+      # Access it with SSH port forwarding, or put a VPN/authenticated proxy in front.
+      - "127.0.0.1:8000:8000"
+    environment:
+      GONGKAO_DATA_DIR: /data
+      GONGKAO_HOST: 0.0.0.0
+      GONGKAO_PORT: 8000
+    volumes:
+      - yanshen_data:/data
+
+volumes:
+  yanshen_data:

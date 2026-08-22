@@ -1,5 +1,7 @@
 """Compose the built-in HTTP server from grouped page controllers."""
 
+import os
+
 from ..agent_indexer import AgentIndexWorker
 from .controllers import (
     AgentController,
@@ -167,7 +169,12 @@ def create_server(host="127.0.0.1", port=5000, db_path=None):
     return server
 
 
-def run(host="127.0.0.1", port=5000, db_path=None):
+def run(host=None, port=None, db_path=None):
+    host = host or os.environ.get("GONGKAO_HOST", "127.0.0.1")
+    try:
+        port = int(port or os.environ.get("GONGKAO_PORT", "5000"))
+    except ValueError as exc:
+        raise ValueError("GONGKAO_PORT 必须是整数。") from exc
     server = create_server(host, port, db_path)
     actual_port = server.server_address[1]
     print(f"研申已启动：http://{host}:{actual_port}")

@@ -35,6 +35,8 @@ python app.py
 
 打开 `http://127.0.0.1:5000`。可用 `GONGKAO_DATA_DIR` 指定个人数据目录，或用 `GONGKAO_DB_PATH` 指定测试数据库。
 
+VPS 部署：见 [DEPLOY.md](DEPLOY.md)。容器默认只监听 VPS 的 localhost，必须配合 SSH 隧道、VPN 或带鉴权的反向代理。
+
 测试与构建：
 
 ```powershell
