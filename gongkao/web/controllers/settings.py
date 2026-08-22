@@ -1,7 +1,7 @@
 """Settings, import, export, and local-record management controllers."""
 
 from ...ai import AiConfigError, AiRequestError, chat_completion, fetch_available_models
-from ..db import get_index_worker_enabled, set_index_worker_enabled
+from ...db import get_index_worker_enabled, set_index_worker_enabled
 from ..runtime import (
     back_link,
     parse_multipart_form,
