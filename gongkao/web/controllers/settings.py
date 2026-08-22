@@ -465,8 +465,10 @@ class SettingsController:
             )
         self.page_settings([("success", "设置已保存。")])
 
-    def _api_settings_from_form(self, data, scope="grading"):
+    def _api_settings_from_form(self, data, scope=None):
         form = parse_qs(data)
+        if scope is None:
+            scope = "agent" if "agent_api_key_env" in form or "agent_api_base_url" in form else "grading"
         table = "ai_settings" if scope == "grading" else "agent_ai_settings"
         key_field = "api_key" if scope == "grading" else "agent_api_key"
         with connect(self.db_path) as conn:
