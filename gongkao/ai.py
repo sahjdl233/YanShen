@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
@@ -11,6 +12,12 @@ class AiConfigError(Exception):
 
 class AiRequestError(Exception):
     pass
+
+
+USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 YanShen/local"
+)
 
 
 def masked_key(value):
@@ -36,11 +43,78 @@ def build_chat_url(base_url):
     if base.endswith("/chat/completions"):
         return base
     parsed = urlparse(base)
-    if parsed.netloc.endswith("api.deepseek.com"):
-        return base + "/chat/completions"
-    if base.endswith("/v1"):
+    path = parsed.path.strip("/")
+    path_parts = path.split("/") if path else []
+    versioned_path = bool(path_parts and re.fullmatch(r"v\d+[a-z]*", path_parts[-1], flags=re.I))
+    if (not versioned_path and len(path_parts) >= 2
+            and re.fullmatch(r"v\d+[a-z]*", path_parts[-2], flags=re.I)
+            and path_parts[-1].lower() == "openai"):
+        versioned_path = True
+    if parsed.netloc.endswith("api.deepseek.com") or versioned_path or base.endswith("/v1"):
         return base + "/chat/completions"
     return base + "/v1/chat/completions"
+
+
+def build_models_url(base_url):
+    chat_url = build_chat_url(base_url)
+    if chat_url.endswith("/chat/completions"):
+        return chat_url.removesuffix("/chat/completions") + "/models"
+    return chat_url.rstrip("/") + "/models"
+
+
+def api_request_headers(api_key):
+    return {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "User-Agent": USER_AGENT,
+    }
+
+
+def fetch_available_models(settings):
+    api_key = resolve_api_key(settings)
+    if not api_key:
+        raise AiConfigError("未找到 API key。请在设置页填写 API key，或设置对应环境变量。")
+    base_url = (settings["api_base_url"] or "").strip()
+    if not base_url:
+        raise AiConfigError("API Base URL 不能为空。")
+
+    request = Request(build_models_url(base_url), headers=api_request_headers(api_key), method="GET")
+    try:
+        with urlopen(request, timeout=30) as response:
+            raw = response.read().decode("utf-8")
+        payload = json.loads(raw)
+    except HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise AiRequestError(f"获取模型列表失败：HTTP {exc.code}。{detail[:500]}") from exc
+    except (URLError, TimeoutError) as exc:
+        raise AiRequestError(f"获取模型列表失败：{getattr(exc, 'reason', exc)}") from exc
+    except json.JSONDecodeError as exc:
+        raise AiRequestError("模型列表返回格式无法解析，请手动填写模型名。") from exc
+
+    rows = payload.get("data") if isinstance(payload, dict) else None
+    if rows is None and isinstance(payload, dict):
+        rows = payload.get("models")
+    if rows is None and isinstance(payload, list):
+        rows = payload
+    if not isinstance(rows, list):
+        raise AiRequestError("服务商未返回 OpenAI-compatible 模型列表，请手动填写模型名。")
+
+    models = []
+    for row in rows:
+        if isinstance(row, str):
+            name = row
+        elif isinstance(row, dict):
+            name = row.get("id") or row.get("model") or row.get("name") or ""
+        else:
+            continue
+        name = str(name).strip()
+        if name and name not in models:
+            models.append(name)
+    if not models:
+        raise AiRequestError("服务商返回的模型列表为空，请手动填写模型名。")
+    models.sort(key=str.casefold)
+    return models
 
 
 def chat_completion(settings, prompt, request_options=None):
@@ -84,15 +158,7 @@ def chat_completion(settings, prompt, request_options=None):
     if isinstance(max_tokens, int) and 1 <= max_tokens <= 384000:
         payload["max_tokens"] = max_tokens
     data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    request = Request(
-        url,
-        data=data,
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
+    request = Request(url, data=data, headers=api_request_headers(api_key), method="POST")
 
     try:
         with urlopen(request, timeout=120) as response:

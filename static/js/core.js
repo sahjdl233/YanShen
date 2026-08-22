@@ -22,6 +22,56 @@ export function answerLineCount(characterCount) {
   return Math.ceil(Math.max(0, Number(characterCount) || 0) / 25);
 }
 
+const HANGING_PUNCTUATION = /[，。、；：？！）》〉」』】〕”’.,;:?!]/;
+
+function gridTokens(value) {
+  const characters = Array.from(value || "");
+  const tokens = [];
+  let index = 0;
+  while (index < characters.length) {
+    const character = characters[index];
+    if (character === "—" || character === "…") {
+      tokens.push({ character, width: 2 });
+      index += characters[index + 1] === character ? 2 : 1;
+      continue;
+    }
+    if (/^[A-Za-z0-9]$/.test(character)) {
+      let end = index + 1;
+      while (end < characters.length && /^[A-Za-z0-9]$/.test(characters[end])) end += 1;
+      tokens.push({ character: characters.slice(index, end).join(""), width: Math.ceil((end - index) / 2) });
+      index = end;
+      continue;
+    }
+    tokens.push({ character, width: 1 });
+    index += 1;
+  }
+  return tokens;
+}
+
+export function answerGridLineMetrics(value, columns = 25) {
+  let currentLineCells = 0;
+  let lineCount = 0;
+  let outsideCells = 0;
+  for (const token of gridTokens(value)) {
+    if (token.width === 1 && HANGING_PUNCTUATION.test(token.character) && currentLineCells === columns) {
+      outsideCells += 1;
+      continue;
+    }
+    if (currentLineCells + token.width > columns) {
+      lineCount += 1;
+      currentLineCells = 0;
+    }
+    currentLineCells += token.width;
+  }
+  const gridCells = lineCount * columns + currentLineCells;
+  return {
+    currentLineCells,
+    gridCells,
+    lineCount: lineCount + (currentLineCells > 0 ? 1 : 0),
+    outsideCells,
+  };
+}
+
 export function answerGridCellsForLine(value) {
   const characters = Array.from(value || "");
   let cells = 0;
@@ -53,20 +103,21 @@ export function answerGridMetrics(value) {
   let occupiedCells = 0;
   let lines = 0;
   let currentLineCells = 0;
+  let outsideCells = 0;
   logicalLines.forEach((line, index) => {
     if (index < logicalLines.length - 1 && line === "") return;
-    const contentCells = answerGridCellsForLine(line);
-    currentLineCells = contentCells ? ((contentCells - 1) % 25) + 1 : 0;
+    const metrics = answerGridLineMetrics(line);
+    currentLineCells = metrics.currentLineCells;
+    outsideCells += metrics.outsideCells;
     if (index < logicalLines.length - 1) {
-      const lineCount = Math.ceil(contentCells / 25);
-      occupiedCells += lineCount * 25;
-      lines += lineCount;
+      occupiedCells += metrics.lineCount * 25;
+      lines += metrics.lineCount;
     } else {
-      occupiedCells += contentCells;
-      lines += Math.ceil(contentCells / 25);
+      occupiedCells += metrics.gridCells;
+      lines += metrics.lineCount;
     }
   });
-  return { occupiedCells, lines, currentLineCells };
+  return { occupiedCells, lines, currentLineCells, outsideCells };
 }
 
 export function answerLimit(value) {

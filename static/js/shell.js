@@ -193,6 +193,75 @@ export function initializeShellControls(signal) {
 
 
 
+function connectionFormValues(form, scope) {
+  const body = new URLSearchParams();
+  const names = scope === "agent"
+    ? ["agent_provider_name", "agent_api_base_url", "agent_model", "agent_api_key_env", "agent_api_key"]
+    : ["provider_name", "api_base_url", "model", "api_key_env", "api_key"];
+  for (const name of names) {
+    const field = form.elements[name];
+    if (field?.value) body.set(name, field.value);
+  }
+  return body;
+}
+
+async function requestSettingsConnection(form, action, status, button) {
+  const scope = button.dataset.settingsScope === "agent" ? "agent" : "grading";
+  const originalLabel = button.textContent;
+  button.disabled = true;
+  status.classList.remove("is-error");
+  status.textContent = action === "test" ? "正在测试连接…" : "正在获取模型列表…";
+  try {
+    const response = await fetch(`/settings/ai/${action}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+      body: connectionFormValues(form, scope),
+    });
+    const result = await response.json();
+    if (!response.ok || !result.ok) {
+      throw new Error(result.error || `请求失败（HTTP ${response.status}）`);
+    }
+    if (action === "test") {
+      status.textContent = result.message || "连接成功。";
+    } else {
+      const list = form.querySelector(scope === "agent" ? "#agent-model-options" : "#grading-model-options");
+      if (list) {
+        list.innerHTML = "";
+        for (const model of result.models || []) {
+          const option = document.createElement("option");
+          option.value = model;
+          list.append(option);
+        }
+      }
+      const modelField = form.elements[scope === "agent" ? "agent_model" : "model"];
+      if (modelField && !modelField.value && result.models?.length) {
+        modelField.value = result.models[0];
+      }
+      status.textContent = `已加载 ${result.models?.length || 0} 个模型，输入框可自动补全。`;
+    }
+  } catch (error) {
+    status.classList.add("is-error");
+    status.textContent = error.message;
+  } finally {
+    button.disabled = false;
+    button.textContent = originalLabel;
+  }
+}
+
+export function initializeSettingsConnections(signal) {
+  const form = document.querySelector(".settings-ai-panel");
+  if (!form || form.dataset.connectionBound === "1") return;
+  form.dataset.connectionBound = "1";
+  for (const button of form.querySelectorAll("[data-settings-test], [data-settings-models]")) {
+    const actions = button.closest(".connection-actions");
+    const status = actions?.querySelector("[data-settings-connection-status]");
+    if (!status) continue;
+    const action = button.hasAttribute("data-settings-test") ? "test" : "models";
+    button.addEventListener("click", () => {
+      requestSettingsConnection(form, action, status, button);
+    }, { signal });
+  }
+}
 export function initializeFilters(_signal, navigatePartial) {
   document.querySelectorAll("form.auto-filter").forEach((form) => {
     form.querySelector("[data-filter-reset]")?.addEventListener("click", () => {

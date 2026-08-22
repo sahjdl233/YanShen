@@ -1,5 +1,6 @@
 """Settings, import, export, and local-record management controllers."""
 
+from ...ai import AiConfigError, AiRequestError, chat_completion, fetch_available_models
 from ..runtime import (
     back_link,
     cgi,
@@ -211,10 +212,16 @@ class SettingsController:
             <div class="settings-fields">
               <label><span>服务商名称</span><input name="provider_name" value="{esc(settings["provider_name"])}" placeholder="DeepSeek"></label>
               <label><span>Base URL</span><input name="api_base_url" value="{esc(settings["api_base_url"])}" placeholder="https://api.deepseek.com"></label>
-              <label><span>模型名</span><input name="model" value="{esc(settings["model"])}" placeholder="deepseek-v4-pro"></label>
+              <label><span>模型名</span><input name="model" value="{esc(settings["model"])}" list="grading-model-options" placeholder="填写服务商提供的模型 ID"><datalist id="grading-model-options"></datalist></label>
               <label><span>Temperature</span><input name="temperature" value="{esc(settings["temperature"])}" inputmode="decimal"></label>
               <label><span>API Key 环境变量</span><input name="api_key_env" value="{esc(settings["api_key_env"])}" placeholder="DEEPSEEK_API_KEY"></label>
               <label><span>API Key</span><input name="api_key" value="" autocomplete="off" placeholder="{esc(key_status)}"></label>
+            </div>
+            <p class="warning-note">填写 API Key 时可直接使用密钥；“API Key 环境变量”只是变量名称（例如 <code>DEEPSEEK_API_KEY</code>），不是密钥本身；两者同时存在时优先使用界面里的 API Key。</p>
+            <div class="connection-actions">
+              <button class="button ghost small" type="button" data-settings-test data-settings-scope="grading">测试连接</button>
+              <button class="button ghost small" type="button" data-settings-models data-settings-scope="grading">获取模型列表</button>
+              <span class="connection-status muted" data-settings-connection-status aria-live="polite"></span>
             </div>
             <label class="check-line"><input type="checkbox" name="clear_api_key" value="1"> 清除已保存的 API Key</label>
             <p class="warning-note">API 自动模式会把题目、整卷材料、参考答案和你的答案发送给你配置的模型服务。</p>
@@ -231,10 +238,15 @@ class SettingsController:
                   <div class="settings-fields">
                     <label><span>服务商名称</span><input name="agent_provider_name" value="{esc(agent_settings["provider_name"])}" placeholder="DeepSeek"></label>
                     <label><span>Base URL</span><input name="agent_api_base_url" value="{esc(agent_settings["api_base_url"])}" placeholder="https://api.deepseek.com"></label>
-                    <label><span>模型名</span><input name="agent_model" value="{esc(agent_settings["model"])}" placeholder="deepseek-v4-pro"></label>
+                    <label><span>模型名</span><input name="agent_model" value="{esc(agent_settings["model"])}" list="agent-model-options" placeholder="填写服务商提供的模型 ID"><datalist id="agent-model-options"></datalist></label>
                     <label><span>Temperature</span><input name="agent_temperature" value="{esc(agent_settings["temperature"])}" inputmode="decimal"></label>
                     <label><span>API Key 环境变量</span><input name="agent_api_key_env" value="{esc(agent_settings["api_key_env"])}" placeholder="DEEPSEEK_API_KEY"></label>
                     <label><span>API Key</span><input name="agent_api_key" value="" autocomplete="off" placeholder="{esc(agent_key_status)}"></label>
+                  </div>
+                  <div class="connection-actions">
+                    <button class="button ghost small" type="button" data-settings-test data-settings-scope="agent">测试教练连接</button>
+                    <button class="button ghost small" type="button" data-settings-models data-settings-scope="agent">获取教练模型</button>
+                    <span class="connection-status muted" data-settings-connection-status aria-live="polite"></span>
                   </div>
                   <label class="check-line"><input type="checkbox" name="clear_agent_api_key" value="1"> 清除已保存的教练 API Key</label>
                 </div>
@@ -417,6 +429,46 @@ class SettingsController:
                 ),
             )
         self.page_settings([("success", "设置已保存。")])
+
+    def _api_settings_from_form(self, data, scope="grading"):
+        form = parse_qs(data)
+        table = "ai_settings" if scope == "grading" else "agent_ai_settings"
+        key_field = "api_key" if scope == "grading" else "agent_api_key"
+        with connect(self.db_path) as conn:
+            current = conn.execute(f"SELECT * FROM {table} WHERE id = 1").fetchone()
+            api_key = form.get(key_field, [""])[0].strip() or (current["api_key"] if current else "")
+        return {
+            "provider_name": form.get("provider_name" if scope == "grading" else "agent_provider_name", ["Custom"])[0].strip() or "Custom",
+            "api_base_url": form.get("api_base_url" if scope == "grading" else "agent_api_base_url", [""])[0].strip(),
+            "model": form.get("model" if scope == "grading" else "agent_model", [""])[0].strip(),
+            "api_key": api_key,
+            "api_key_env": form.get("api_key_env" if scope == "grading" else "agent_api_key_env", [""])[0].strip(),
+            "temperature": 0,
+        }
+
+    def handle_settings_ai_test(self):
+        length = int(self.headers.get("Content-Length", "0"))
+        data = self.rfile.read(length).decode("utf-8")
+        try:
+            settings = self._api_settings_from_form(data)
+            chat_completion(settings, "请只回复 OK，用于测试连接。")
+        except (AiConfigError, AiRequestError) as exc:
+            self.send_json({"ok": False, "error": str(exc)})
+            return
+        provider = settings["provider_name"]
+        model = settings["model"]
+        self.send_json({"ok": True, "message": f"{provider} / {model} 连接成功。"})
+
+    def handle_settings_ai_models(self):
+        length = int(self.headers.get("Content-Length", "0"))
+        data = self.rfile.read(length).decode("utf-8")
+        try:
+            settings = self._api_settings_from_form(data)
+            models = fetch_available_models(settings)
+        except (AiConfigError, AiRequestError) as exc:
+            self.send_json({"ok": False, "error": str(exc), "models": []})
+            return
+        self.send_json({"ok": True, "models": models})
 
     def handle_settings_local_records_clear(self):
         length = int(self.headers.get("Content-Length", "0"))

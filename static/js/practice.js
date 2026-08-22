@@ -1,10 +1,9 @@
 import { anchorTextAnnotations, annotationSaveTimers, annotationStates, bindChineseAnswerPunctuation, bindPlainTextEditing, editableValue, readTextAnnotations, renderTextAnnotations, setEditableValue, textFingerprint } from "./annotations.js";
-import { AutosaveCoordinator, answerGridCellsForLine, answerGridMetrics, answerLimit, answerLineCount, clampNumber, draftStorageKey, readDraft, readPaneWidth, removeDraft, showUndoToast, writeDraft, writePaneWidth } from "./core.js";
+import { AutosaveCoordinator, answerGridLineMetrics, answerGridMetrics, answerLimit, answerLineCount, clampNumber, draftStorageKey, readDraft, readPaneWidth, removeDraft, showUndoToast, writeDraft, writePaneWidth } from "./core.js";
 import { bindPaperSummaryTimer, bindPracticeTimer } from "./timers.js";
 
 function paragraphLastLineCells(line) {
-  const cells = answerGridCellsForLine(line);
-  return cells ? ((cells - 1) % 25) + 1 : 0;
+  return answerGridLineMetrics(line).currentLineCells;
 }
 
 export function answerEditorDefaultHeight(wordLimit) {
@@ -209,8 +208,9 @@ export function initializePractice(signal) {
       const gridMetrics = answerGridMetrics(value);
       const current = gridMetrics.occupiedCells;
       const currentLines = gridMetrics.lines;
+      const outsidePunctuation = gridMetrics.outsideCells || 0;
       const limitLines = answerLineCount(limit ? limit - 1 : 0);
-      count.textContent = String(current);
+      count.textContent = outsidePunctuation ? `${current}+${outsidePunctuation}` : String(current);
       if (lineStatus) {
         lineStatus.textContent = limit
           ? `行数：${currentLines}/${limitLines}`
@@ -226,9 +226,9 @@ export function initializePractice(signal) {
       if (!limit) {
         status.textContent = current ? "题目未标注字数上限" : "开始作答后实时统计";
       } else if (current >= limit) {
-        status.textContent = `已超出硬限制，至少需减少 ${current - limit + 1} 字（必须低于 ${limit} 字）`;
+        status.textContent = `已超出建议上限 ${current - limit + 1} 字；仍可保存和批改，正式阅卷可能扣形式分。`;
       } else {
-        status.textContent = `还可输入 ${limit - current - 1} 字（必须低于 ${limit} 字）`;
+        status.textContent = `还可输入 ${limit - current - 1} 字（含行外标点缓冲）`;
       }
       if (submitButton) {
         submitButton.hidden = value === serverSavedValue;

@@ -24,7 +24,7 @@
 
 ## 智能批改
 
-配置方法见 [DeepSeek API 配置教程](docs/deepseek-api-setup.md)。检索、参考答案聚类和证据筛选在本地完成；只有主动使用智能批改或 AI 功能时，当前题必要数据和少量命中证据才会发送给所配置的模型服务。API Key 不应提交到仓库。
+支持任意 OpenAI-compatible 模型服务，配置方法见 [OpenAI-compatible API 配置教程](docs/deepseek-api-setup.md)。检索、参考答案聚类和证据筛选在本地完成；只有主动使用智能批改或 AI 功能时，当前题必要数据和少量命中证据才会发送给所配置的模型服务。API Key 不应提交到仓库。
 
 ## 源码运行与本地构建
 

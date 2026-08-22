@@ -23,6 +23,7 @@ import { initializePractice } from "./js/practice.js";
 import {
   initializeFilters,
   initializeGlobalForms,
+  initializeSettingsConnections,
   initializeShellControls,
   initializeTabsAndPagination,
 } from "./js/shell.js";
@@ -60,6 +61,7 @@ export function mountPage() {
   initializeGlobalForms(signal);
   initializeAgent(signal, navigatePartial);
   initializeShellControls(signal);
+  initializeSettingsConnections(signal);
   initializePractice(signal);
   initializeAnnotations(signal);
   initializeFilters(signal, navigatePartial);

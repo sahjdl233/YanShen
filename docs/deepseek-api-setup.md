@@ -1,53 +1,56 @@
-# DeepSeek API 配置教程
+# OpenAI-compatible API 配置教程
 
-本工具的智能批改使用 OpenAI-compatible Chat Completions 接口。DeepSeek 官方 API 文档入口：
+研申不绑定 DeepSeek。任何兼容 OpenAI **Chat Completions** 和 `/v1/models` 的服务都可以使用，例如 DeepSeek、硅基流动、OpenRouter、阿里云百炼、火山方舟或自建网关。
 
-- DeepSeek API Docs: <https://api-docs.deepseek.com/>
-- DeepSeek Platform: <https://platform.deepseek.com/>
+## 1. 获取服务商配置
 
-## 1. 注册并进入控制台
+1. 登录模型服务商控制台，创建 API Key。
+2. 找到它的 **OpenAI-compatible Base URL**，必须是 API 域名，不是网页聊天地址。
+3. 记录要使用的模型 ID。
 
-1. 打开 <https://platform.deepseek.com/>。
-2. 登录或注册 DeepSeek 账号。
-3. 进入控制台后，确认账号余额或充值状态可用。
+常见形式：
 
-## 2. 创建 API Key
+- `https://api.deepseek.com` → 系统会请求 `/chat/completions`
+- `https://api.example.com/v1` → 系统会请求 `/v1/chat/completions` 和 `/v1/models`
+- `https://api.example.com/v4` → 系统会请求 `/v4/chat/completions` 和 `/v4/models`
 
-1. 在 DeepSeek Platform 中打开 **API Keys** 页面。
-2. 点击创建新的 API Key。
-3. 复制生成的 Key，并妥善保存。页面通常只会完整展示一次。
+## 2. 在“研申”中配置
 
-不要把 API Key 填进 README、截图、导出文件或公开仓库。
+打开 **设置** 页：
 
-## 3. 在“研申”中配置
+- 运行模式：`API 自动模式`
+- 服务商名称：自定义，例如 `SiliconFlow`
+- Base URL：填写服务商的 OpenAI-compatible 地址
+- 模型名：先填一个，或点击“获取模型列表”后从自动补全中选择
+- Temperature：通常保持 `0.2`
 
-打开应用中的 **设置** 页面，使用以下配置：
+## 3. API Key 与环境变量
 
-- 运行模式：`api`
-- API 批改能力：`智能批改`
-- 服务商：`DeepSeek`
-- API Base URL：`https://api.deepseek.com`
-- 模型：`deepseek-v4-pro`
-- API Key：粘贴你刚创建的 Key
+直接把密钥粘贴到 **API Key** 输入框即可。
 
-也可以不在界面里明文保存 Key，而是在系统环境变量中设置：
+**API Key 环境变量**不是密钥本身，而是存放密钥的系统变量名称。例如你执行过：
 
 ```powershell
-setx DEEPSEEK_API_KEY "你的 DeepSeek API Key"
+setx EXAMPLE_API_KEY "sk-..."
 ```
 
-重新打开应用后，设置页保留 `API Key 环境变量名` 为 `DEEPSEEK_API_KEY` 即可。
+设置页就填写：
 
-## 4. 测试连接
+- API Key：留空
+- API Key 环境变量：`EXAMPLE_API_KEY`
 
-1. 在设置页点击 **测试连接**。
-2. 显示连接成功后，回到批改工作台。
-3. 在作答详情页点击 **智能批改** 下的 **开始智能批改**。
+如果两者都填了，界面里的 **API Key** 优先。不要把 Key 写进截图、仓库、导出文件或聊天记录。
 
-## 5. 常见问题
+## 4. 测试和获取模型列表
 
-- **提示未找到 API Key**：检查界面 API Key 是否填写，或 `DEEPSEEK_API_KEY` 是否在重新打开应用后生效。
-- **请求失败或余额不足**：进入 DeepSeek Platform 检查余额、账单和 Key 状态。
-- **返回格式不兼容**：确认 API Base URL 为 `https://api.deepseek.com`，不要填网页聊天地址。
-- **不想上传作答**：使用 Codex 手动模式。本工具只有你主动点击智能批改时，才会发送当前题必要数据和本地检索出的少量证据。
-- **智能批改失败**：可重试，或在设置中切换为“基础批改”使用原有链路。
+设置页新增了两个按钮：
+
+- **测试连接**：发送一条极小的 Chat Completions 测试消息。
+- **获取模型列表**：请求 `/models`；如果服务商不支持该接口，仍可手动填写模型 ID。
+
+## 5. 常见错误
+
+- **HTTP 403 / error code 1010**：确认用的是 API Base URL 而不是网页地址；部分防火墙会拦截默认脚本 User-Agent，研申已改为浏览器风格 UA 并附带标准 Accept 头。若仍 403，请联系服务商确认域名、地域或访问策略。
+- **HTTP 401/403 且提示 invalid key**：检查 Key、额度、模型授权和 Base URL。
+- **HTTP 404**：Base URL 缺少版本路径，或服务商的路径不是 OpenAI-compatible。
+- **返回格式无法解析**：该地址可能只是网页或代理网关，不是 Chat Completions API。

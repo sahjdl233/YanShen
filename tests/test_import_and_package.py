@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 from uuid import uuid4
 
-from gongkao.ai import build_chat_url, chat_completion
+from gongkao.ai import api_request_headers, build_chat_url, build_models_url, chat_completion, fetch_available_models
 from gongkao.db import connect, init_db
 from gongkao.grading import (
     answer_grid_metrics,
@@ -54,8 +54,11 @@ class AnswerGridCountTest(unittest.TestCase):
         self.assertEqual(answer_grid_metrics("甲\n乙")["occupied_cells"], 26)
         self.assertEqual(
             answer_grid_metrics("甲\n\n乙"),
-            {"occupied_cells": 26, "lines": 2, "columns": 25, "current_line_cells": 1},
+            {"occupied_cells": 26, "lines": 2, "columns": 25, "current_line_cells": 1, "outside_cells": 0},
         )
+        metrics = answer_grid_metrics("甲" * 25 + "，")
+        self.assertEqual(metrics["occupied_cells"], 25)
+        self.assertEqual(metrics["outside_cells"], 1)
         self.assertEqual(answer_grid_metrics("甲" * 25)["current_line_cells"], 25)
         self.assertEqual(answer_grid_metrics("甲" * 26)["current_line_cells"], 1)
         self.assertEqual(answer_grid_metrics("甲\n")["current_line_cells"], 0)
@@ -272,6 +275,35 @@ class ImportAndPackageTest(unittest.TestCase):
     def test_chat_url_builder(self):
         self.assertEqual(build_chat_url("https://api.deepseek.com"), "https://api.deepseek.com/chat/completions")
         self.assertEqual(build_chat_url("https://api.openai.com/v1"), "https://api.openai.com/v1/chat/completions")
+        self.assertEqual(build_chat_url("https://open.bigmodel.cn/api/paas/v4"), "https://open.bigmodel.cn/api/paas/v4/chat/completions")
+        self.assertEqual(build_chat_url("https://generativelanguage.googleapis.com/v1beta/openai"), "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions")
+        self.assertEqual(build_models_url("https://api.example.com"), "https://api.example.com/v1/models")
+        headers = api_request_headers("test-key")
+        self.assertTrue(headers["User-Agent"].startswith("Mozilla/5.0"))
+
+    def test_fetch_available_models_supports_openai_compatible_payload(self):
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self):
+                return b'{"data":[{"id":"model-b"},{"id":"model-a"}]}'
+
+        captured = []
+
+        def fake_urlopen(request, timeout):
+            captured.append(request)
+            return FakeResponse()
+
+        settings = {"api_key": "", "api_key_env": "TEST_MODEL_KEY", "api_base_url": "https://api.example.com/v1"}
+        with patch.dict("os.environ", {"TEST_MODEL_KEY": "env-key"}), patch("gongkao.ai.urlopen", side_effect=fake_urlopen):
+            models = fetch_available_models(settings)
+        self.assertEqual(models, ["model-a", "model-b"])
+        self.assertEqual(captured[0].full_url, "https://api.example.com/v1/models")
+        self.assertEqual(captured[0].headers["Authorization"], "Bearer env-key")
 
     def test_deepseek_thinking_option_is_added_only_for_supported_model(self):
         captured = []

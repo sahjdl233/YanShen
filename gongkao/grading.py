@@ -3,6 +3,7 @@ import re
 from .timeutils import format_beijing_time
 
 ANSWER_GRID_COLUMNS = 25
+HANGING_ANSWER_PUNCTUATION = set("，。、；：？！）》〉」』】〕”’.,;:?!")
 
 
 def limited_reference_guidance(reference_count):
@@ -50,31 +51,72 @@ def _grid_cells_for_line(text):
     return cells
 
 
+def _grid_line_metrics(text, columns=ANSWER_GRID_COLUMNS):
+    characters = list(text or "")
+    current_line_cells = 0
+    line_count = 0
+    outside_cells = 0
+    index = 0
+    while index < len(characters):
+        character = characters[index]
+        if character in {"—", "…"}:
+            width = 2
+            index += 2 if index + 1 < len(characters) and characters[index + 1] == character else 1
+        elif character.isascii() and character.isalnum():
+            end = index + 1
+            while end < len(characters) and characters[end].isascii() and characters[end].isalnum():
+                end += 1
+            width = (end - index + 1) // 2
+            index = end
+        else:
+            width = 1
+            index += 1
+
+        if width == 1 and character in HANGING_ANSWER_PUNCTUATION and current_line_cells == columns:
+            # A closing punctuation mark that would start the next printed row
+            # is written outside the preceding row on a physical answer sheet.
+            outside_cells += 1
+            continue
+        if current_line_cells + width > columns:
+            line_count += 1
+            current_line_cells = 0
+        current_line_cells += width
+
+    return {
+        "current_line_cells": current_line_cells,
+        "grid_cells": line_count * columns + current_line_cells,
+        "line_count": line_count + (1 if current_line_cells else 0),
+        "outside_cells": outside_cells,
+    }
+
+
 def answer_grid_metrics(text, columns=ANSWER_GRID_COLUMNS):
     columns = max(1, int(columns or ANSWER_GRID_COLUMNS))
     logical_lines = str(text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")
     occupied_cells = 0
     occupied_lines = 0
     current_line_cells = 0
+    outside_cells = 0
     last_index = len(logical_lines) - 1
     for index, line in enumerate(logical_lines):
         if index < last_index and line == "":
             # 纯空白段仅用于视觉分隔，不占用模拟答题行。
             continue
-        content_cells = _grid_cells_for_line(line)
-        current_line_cells = ((content_cells - 1) % columns) + 1 if content_cells else 0
+        metrics = _grid_line_metrics(line, columns)
+        current_line_cells = metrics["current_line_cells"]
+        outside_cells += metrics["outside_cells"]
         if index < last_index:
-            line_count = (content_cells + columns - 1) // columns
-            occupied_cells += line_count * columns
-            occupied_lines += line_count
+            occupied_cells += metrics["line_count"] * columns
+            occupied_lines += metrics["line_count"]
         else:
-            occupied_cells += content_cells
-            occupied_lines += (content_cells + columns - 1) // columns
+            occupied_cells += metrics["grid_cells"]
+            occupied_lines += metrics["line_count"]
     return {
         "occupied_cells": occupied_cells,
         "lines": occupied_lines,
         "columns": columns,
         "current_line_cells": current_line_cells,
+        "outside_cells": outside_cells,
     }
 
 
@@ -513,7 +555,7 @@ REPORT_INSTRUCTIONS = """你是一名严谨的申论批改老师。请基于题�
 6. 评分要像真实申论批改：重视要点覆盖、材料依据、结构逻辑、表达规范和字数格式。
 7. 修改建议要可操作，指出应补、应删、应合并、应规范表达的位置。
 8. 禁止用重复表达、空泛背景、无材料依据的意义、例证和套话凑字数。生成时应保留安全余量，避免答案贴近硬上限后因标点、空格或手动换行超限。
-9. 字数统一按考试答题纸占格规则估算：汉字、全角标点每个一格；连续英文、半角数字每两个字符一格；标准“——”“……”整体两格，单独“—”“…”也按两格；空格一格；手动换行立即结算本行剩余格并从下一行开始，纯空白行不占格；不自动添加段首缩进。
+9. 字数统一按考试答题纸占格规则估算：汉字、全角标点每个一格；行首禁则标点可写在上一行行外且不另占下一行格；连续英文、半角数字每两个字符一格；标准“——”“……”整体两格，单独“—”“…”也按两格；空格一格；手动换行立即结算本行剩余格并从下一行开始，纯空白行不占格；不自动添加段首缩进。
 
 请固定输出以下 Markdown 结构：
 

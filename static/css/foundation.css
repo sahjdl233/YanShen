@@ -2261,6 +2261,23 @@ aside.settings-panel {
   color: var(--muted);
 }
 
+.connection-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: -4px;
+}
+
+.connection-status {
+  min-width: 180px;
+  font-size: 12px;
+}
+
+.connection-status.is-error {
+  color: #a33f35;
+}
+
 .settings-panel > label.check-line {
   display: flex;
   justify-content: flex-start;

@@ -1608,7 +1608,7 @@ class ReleaseRuntimeTest(unittest.TestCase):
         self.assertIn("answerGridCellsForLine", script_source)
         self.assertIn('compact.includes("左右") && upper > 500', script_source)
         self.assertIn("current >= limit", script_source)
-        self.assertIn("必须低于 ${limit} 字", script_source)
+        self.assertIn("仍可保存和批改", script_source)
         self.assertIn("Math.ceil(Math.max(0, Number(characterCount) || 0) / 25)", script_source)
         self.assertIn("data-line-status", server_source)
         self.assertIn("data-current-line-status", server_source)
