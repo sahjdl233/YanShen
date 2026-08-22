@@ -250,36 +250,86 @@ def build_rubric_prompt(question, materials, references, consensus):
 """
 
 
+def _escape_unescaped_quotes_in_strings(candidate):
+    """Walk through candidate and escape double quotes that are inside string values.
+
+    A double quote is considered "closing" only if the next non-whitespace
+    character is one of: , } ] : (or end of input). Otherwise it's treated
+    as an unescaped inner quote and backslash-escaped.
+    """
+    result = []
+    in_string = False
+    i = 0
+    n = len(candidate)
+    while i < n:
+        ch = candidate[i]
+        if in_string and ch == '\\':
+            # Preserve existing escape sequences
+            if i + 1 < n:
+                result.append(ch)
+                result.append(candidate[i + 1])
+                i += 2
+                continue
+            else:
+                result.append('\\\\')
+                i += 1
+                continue
+        if ch == '"':
+            if not in_string:
+                in_string = True
+                result.append(ch)
+                i += 1
+                continue
+            # We're inside a string; check if this quote legitimately closes it.
+            j = i + 1
+            while j < n and candidate[j] in ' \t\r\n':
+                j += 1
+            if j >= n or candidate[j] in ',}]:':
+                # Legitimate closing quote
+                in_string = False
+                result.append(ch)
+                i += 1
+            else:
+                # Inner unescaped quote - escape it
+                result.append('\\"')
+                i += 1
+            continue
+        if not in_string and (ch == '{' or ch == '['):
+            pass  # structural, just append
+        if not in_string and (ch == '}' or ch == ']'):
+            pass  # structural, just append
+        result.append(ch)
+        i += 1
+    return ''.join(result)
+
+
 def _repair_json(candidate):
     """Attempt common LLM JSON fixes: trailing commas, unescaped control chars, missing closers."""
     fixed = candidate.strip()
-    # Remove trailing commas before } or ]
     fixed = re.sub(r",\s*([}\]])", r"\1", fixed)
-    # Escape raw newlines/tabs that appear inside string values
-    # This is tricky: we only want to escape them when they're between quotes.
-    # A simple heuristic: replace bare \n with \\n only if not already escaped.
-    lines = fixed.split("\n")
-    rebuilt = []
-    for line in lines:
-        # Skip lines that are structural (start/end braces, etc.)
-        stripped = line.lstrip()
-        if stripped.startswith(('"', "{", "}", "[", "]", "//")) or not stripped:
-            rebuilt.append(line)
-        elif '"' in line:
-            # Likely a value line; escape internal newlines won't apply per-line,
-            # but tabs can be an issue.
-            rebuilt.append(line.replace("\t", "\\t"))
-        else:
-            rebuilt.append(line)
-    fixed = "\n".join(rebuilt)
 
-    for attempt in [fixed]:
-        try:
-            return json.loads(attempt)
-        except json.JSONDecodeError:
-            pass
+    try:
+        return json.loads(fixed)
+    except json.JSONDecodeError:
+        pass
 
-    # Try balancing brackets: count unmatched { } [ ]
+    # Fix Python-style booleans/null
+    fixed = re.sub(r"\bTrue\b", "true", fixed)
+    fixed = re.sub(r"\bFalse\b", "false", fixed)
+    fixed = re.sub(r"\bNone\b", "null", fixed)
+    try:
+        return json.loads(fixed)
+    except json.JSONDecodeError:
+        pass
+
+    # Fix unescaped quotes inside strings (most common LLM error with Chinese text)
+    fixed = _escape_unescaped_quotes_in_strings(fixed)
+    try:
+        return json.loads(fixed)
+    except json.JSONDecodeError:
+        pass
+
+    # Balance brackets after quote fix
     opens_curly = fixed.count("{") - fixed.count("}")
     opens_square = fixed.count("[") - fixed.count("]")
     if opens_curly > 0 or opens_square > 0:
@@ -289,7 +339,7 @@ def _repair_json(candidate):
         except json.JSONDecodeError:
             pass
 
-    # Last resort: strip trailing commas again after bracket fix
+    # Final attempt: strip trailing commas again
     fixed = re.sub(r",\s*([}\]])", r"\1", fixed)
     try:
         return json.loads(fixed)

@@ -148,24 +148,48 @@ def chat_completion(settings, prompt, request_options=None):
     ):
         payload["thinking"] = {"type": thinking_type}
     response_format = request_options.get("response_format")
-    if isinstance(response_format, dict) and response_format.get("type") == "json_object":
-        payload["response_format"] = {"type": "json_object"}
+    json_schema = request_options.get("json_schema")
+    use_json = isinstance(response_format, dict) and response_format.get("type") == "json_object"
+    if use_json:
         payload["messages"][0]["content"] += (
             " 当前任务要求 JSON 输出：最终内容必须是单个合法 JSON 对象，"
             "不要输出 Markdown、XML 标签或任何额外文字。"
+            "字符串值内的英文双引号必须用反斜杠转义。"
+            "禁止尾逗号、单引号、Python True/False/None。"
         )
+        if isinstance(json_schema, dict):
+            payload["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {"name": "grading_result", "strict": False, **json_schema},
+            }
+        else:
+            payload["response_format"] = {"type": "json_object"}
     max_tokens = request_options.get("max_tokens")
     if isinstance(max_tokens, int) and 1 <= max_tokens <= 384000:
         payload["max_tokens"] = max_tokens
-    data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    request = Request(url, data=data, headers=api_request_headers(api_key), method="POST")
+    def _send(p):
+        req = Request(url, data=json.dumps(p, ensure_ascii=False).encode("utf-8"), headers=api_request_headers(api_key), method="POST")
+        ai_timeout = int(os.environ.get("GONGKAO_AI_TIMEOUT", "300"))
+        with urlopen(req, timeout=max(30, ai_timeout)) as resp:
+            return resp.read().decode("utf-8")
 
     try:
-        with urlopen(request, timeout=120) as response:
-            raw = response.read().decode("utf-8")
+        raw = _send(payload)
     except HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")
-        raise AiRequestError(f"API 请求失败：HTTP {exc.code}。{detail[:500]}") from exc
+        if exc.code in (400, 422) and payload.get("response_format", {}).get("type") == "json_schema":
+            payload["response_format"] = {"type": "json_object"}
+            try:
+                raw = _send(payload)
+            except HTTPError as exc2:
+                detail2 = exc2.read().decode("utf-8", errors="replace")
+                raise AiRequestError(f"API 请求失败：HTTP {exc2.code}。{detail2[:500]}") from exc2
+            except URLError as exc2:
+                raise AiRequestError(f"API 连接失败：{exc2.reason}") from exc2
+            except TimeoutError as exc2:
+                raise AiRequestError("API 请求超时，请稍后重试或换用 Codex 手动模式。") from exc2
+        else:
+            detail = exc.read().decode("utf-8", errors="replace")
+            raise AiRequestError(f"API 请求失败：HTTP {exc.code}。{detail[:500]}") from exc
     except URLError as exc:
         raise AiRequestError(f"API 连接失败：{exc.reason}") from exc
     except TimeoutError as exc:

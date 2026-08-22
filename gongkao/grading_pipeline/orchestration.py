@@ -164,9 +164,30 @@ def _call_grading_model(
         request_options.update(
             {
                 "response_format": {"type": "json_object"},
-                # Deep-think reasoning consumes tokens before the final JSON,
-                # so the structured response needs headroom to avoid truncation
-                # (which used to force a repair round).
+                "json_schema": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "evaluation": {
+                                "type": "object",
+                                "properties": {
+                                    "point_matches": {"type": "array"},
+                                    "dimension_scores": {"type": "array"},
+                                    "holistic_adjustment_reason": {"type": "string"},
+                                    "annotations": {"type": "array"},
+                                    "reference_fusion": {"type": "string"},
+                                    "material_reading": {"type": "array"},
+                                    "optimization_suggestions": {"type": "array"},
+                                    "personalized_findings": {"type": "array"},
+                                    "summary": {"type": "object"},
+                                    "revised_answer": {"type": "string"}
+                                },
+                                "required": ["point_matches", "dimension_scores"]
+                            }
+                        },
+                        "required": ["evaluation"]
+                    }
+                },
                 "max_tokens": 16384,
             }
         )
