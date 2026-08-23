@@ -80,6 +80,24 @@ def _load_langgraph():
 _str_response_patched = False
 
 
+def _normalize_raw_string_response(response):
+    try:
+        return json.loads(response)
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return {
+        "choices": [
+            {
+                "finish_reason": "stop",
+                "index": 0,
+                "message": {"content": response, "role": "assistant"},
+            }
+        ],
+        "model": "",
+        "object": "chat.completion",
+    }
+
+
 def _patch_str_response_compat(base_class):
     """Some OpenAI-compatible proxies return raw strings instead of parsed objects."""
     global _str_response_patched
@@ -90,10 +108,7 @@ def _patch_str_response_compat(base_class):
 
     def _safe_create(self, response, generation_info=None):
         if isinstance(response, str):
-            try:
-                response = json.loads(response)
-            except (json.JSONDecodeError, TypeError):
-                pass
+            response = _normalize_raw_string_response(response)
         return _original(self, response, generation_info)
 
     base_class._create_chat_result = _safe_create
