@@ -154,6 +154,12 @@ def normalize_query_plan(plan=None, user_goal="", task_type="diagnosis", subject
     if referential_followup and module in {"summary", "analysis", "countermeasure", "document", "essay", "top_loss", "improvement"} and not explicit_module_change:
         normalized["module"] = module
     writing_guidance_requested = _wants_guidance(user_goal)
+    if task_type == "review" and subject_ids and any(
+        marker in (user_goal or "") for marker in (
+            "本题", "这题", "这道", "这份", "我的答案", "复盘", "改写", "润色", "那具体", "按你说的", "刚才", "和上一次",
+        )
+    ) and not any(marker in (user_goal or "") for marker in ("只讲方法", "不看作答", "通用方法")):
+        writing_guidance_requested = False
     explicit_note_organization = _wants_note_organization(user_goal)
     history_expansion_requested = any(
         key in (user_goal or "")
@@ -408,13 +414,13 @@ def cards_from_review_context(review_context, rag_route):
                     attempt_id=attempt_id,
                     supports=supports + ["structure_judgement", "rewrite_attempt"],
                     confidence=0.82,
-                    metadata={"material_number": number},
+                    metadata={"material_number": number, "source_id": material.get("id")},
                 )
             )
         for index, report in enumerate(item.get("reports") or [], start=1):
             cards.append(
                 make_card(
-                    f"report:{attempt_id}:{index}",
+                    f"grading_report:{report['id']}" if report.get("id") else f"report:{attempt_id}:{index}",
                     "grading_report",
                     f"批改报告 {index}",
                     report.get("report_text", ""),
@@ -423,13 +429,13 @@ def cards_from_review_context(review_context, rag_route):
                     attempt_id=attempt_id,
                     supports=supports + ["loss_analysis", "rewrite_attempt"],
                     confidence=0.88,
-                    metadata={"provider": report.get("provider"), "model": report.get("model")},
+                    metadata={"provider": report.get("provider"), "model": report.get("model"), "source_id": report.get("id")},
                 )
             )
         for index, reference in enumerate(item.get("references") or [], start=1):
             cards.append(
                 make_card(
-                    f"reference:{question_id}:{index}",
+                    f"reference_answer:{reference['id']}" if reference.get("id") else f"reference:{question_id}:{index}",
                     "reference_answer",
                     f"参考答案 {reference.get('organization', index)}",
                     "\n".join([reference.get("answer_text", ""), reference.get("scoring_points", "")]),
@@ -438,6 +444,7 @@ def cards_from_review_context(review_context, rag_route):
                     attempt_id=attempt_id,
                     supports=supports + ["rewrite_attempt"],
                     confidence=0.78,
+                    metadata={"source_id": reference.get("id")},
                 )
             )
     return cards
@@ -503,7 +510,7 @@ def cards_from_module_context(module_context):
             )
         )
     for chunk in module_context.get("evidence_chunks") or []:
-        evidence_id = _normalize_evidence_id(chunk.get("evidence_ref"), chunk.get("source_type"), chunk.get("source_id"))
+        evidence_id = f"{chunk['source_type']}:{chunk['source_id']}" if chunk.get("source_id") is not None else _normalize_evidence_id(chunk.get("evidence_ref"), chunk.get("source_type"), chunk.get("source_id"))
         cards.append(
             make_card(
                 evidence_id,
@@ -515,7 +522,7 @@ def cards_from_module_context(module_context):
                 attempt_id=chunk.get("attempt_id"),
                 supports=supports,
                 confidence=(chunk.get("retrieval") or {}).get("rerank_score") or 0.76,
-                metadata={"score": chunk.get("score"), "retrieval": chunk.get("retrieval") or {}},
+                metadata={"source_id": chunk.get("source_id"), "score": chunk.get("score"), "retrieval": chunk.get("retrieval") or {}},
             )
         )
     return cards
@@ -664,29 +671,30 @@ def cards_from_knowledge(conn, user_goal="", module="overview", limit=8):
     return cards
 
 
-def build_rag_context(conn, task_type, user_goal, subject_ids=None, module="", filters=None, user_context=None, candidates=None, review_context=None, query_plan=None):
+def build_rag_context(conn, task_type, user_goal, subject_ids=None, module="", filters=None, user_context=None, candidates=None, review_context=None, query_plan=None, retrieval_query=None):
     subject_ids = subject_ids or []
     filters = filters or {}
     module = valid_module_id(module or "")
     query_plan = normalize_query_plan(query_plan, user_goal, task_type, subject_ids, module)
     module = query_plan.get("module") or module
     rag_route = route_from_plan(query_plan)
+    search_query = retrieval_query or user_goal
     module_context = {}
     cards = []
     if rag_route in {"current_attempt_review", "structure_judgement", "rewrite_attempt"}:
         cards = cards_from_review_context(review_context or {}, rag_route)
         if "knowledge" in query_plan.get("sources", []) or rag_route in {"structure_judgement", "rewrite_attempt"}:
-            cards.extend(cards_from_knowledge(conn, user_goal, module, limit=6))
+            cards.extend(cards_from_knowledge(conn, search_query, module, limit=6))
     elif rag_route == "note_organization":
         cards = cards_from_notes(conn)
         if "knowledge" in query_plan.get("sources", []):
-            cards.extend(cards_from_knowledge(conn, user_goal, module, limit=6))
+            cards.extend(cards_from_knowledge(conn, search_query, module, limit=6))
     elif rag_route == "writing_guidance":
-        cards = cards_from_knowledge(conn, user_goal, module, limit=10)
+        cards = cards_from_knowledge(conn, search_query, module, limit=10)
     elif rag_route == "recommend_questions":
         cards = cards_from_candidates(candidates or [], user_context)
     else:
-        module_context = retrieve_module_evidence(conn, module or "overview", user_goal, filters)
+        module_context = retrieve_module_evidence(conn, module or "overview", search_query, filters)
         module_context["candidate_questions"] = candidates or []
         cards = cards_from_module_context(module_context)
         if candidates:
